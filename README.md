@@ -25,7 +25,10 @@ are present in the repository. If your branch is displayed as `* "your-branch-na
 
 # Requirements 
 
-We recommend using a conda environment
+We recommend using a conda environment:
 
-`conda` install numpy matplotlib 
-`conda` install -c conda-forge librosa
+`conda create -n "env-name" python=3.11` <!-- You need python=3.11 for the library pyaudio -->
+
+`conda install numpy matplotlib` 
+<!-- `conda install -c conda-forge librosa` -->
+`conda install -c main::pyaudio`
