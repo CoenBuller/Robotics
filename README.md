@@ -7,7 +7,7 @@ This repository contains all the code for the mobile robots challenge and the fi
 We recommend using a conda environment
 
 ```
-'conda' install numpy matplotlib 
-'conda' install -c conda-forge librosa
+`conda` install numpy matplotlib 
+`conda` install -c conda-forge librosa
 
 ```
