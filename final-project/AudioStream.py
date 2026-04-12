@@ -1,26 +1,19 @@
 import sounddevice as sd
 import numpy as np
 
-CHUNK = 256
-RATE = 16_000
-LEN = 10 
+sd.default.samplerate = 16_000
+sd.default.channels = 1
+sd.default.blocksize = 256
+sd.default.dtype = np.int16
 
-p = pa.PyAudio()
+duration = 5 
 
-stream = p.open(
-    format=pa.paInt16, channels=1, rate=RATE, input=True, frames_per_buffer=CHUNK
-)
-
-player = p.open(
-    format=pa.paInt16, channels=1, rate=RATE, output=True, frames_per_buffer=CHUNK
-)
-
-for i in range(int(LEN * RATE / CHUNK)):  # go for a LEN seconds
-    data = np.frombuffer(stream.read(CHUNK), dtype=np.int16)
+def callback(indata, outdata, frames, time, status):
+    if status:
+        print(status)
+    outdata[:] = indata
+    print(len(indata))
     
-    
-stream.stop_stream()
-stream.close()
-p.terminate()
-
+with sd.Stream(callback=callback):
+    sd.sleep(int(duration * 1000))
 
