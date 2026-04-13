@@ -1,11 +1,6 @@
-import sounddevice as sd
 import numpy as np
+import sounddevice as sd
 import queue 
-
-sd.default.samplerate = 16_000
-sd.default.channels = 1
-sd.default.blocksize = 256
-sd.default.dtype = np.int16 
 
 audio_queue = queue.Queue()
 
@@ -18,14 +13,8 @@ with sd.InputStream(device=1, channels=1, callback=callback):
         while True:
             data = audio_queue.get() # Extract data
 
-
-            ########### Put functions to process data here #############
             if np.max(data) > 0.5:
                 print("Very loud noise detected, could execute action here")
                 
     except KeyboardInterrupt:
         print("Done processing live data")
-
-    
-
-
