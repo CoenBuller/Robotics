@@ -61,7 +61,7 @@ with stream:
                 while not audio_queue.empty():
                     soundData = audio_queue.get()
                     hanningFft, mfcc, pitch, amplitude = ap.CalcMFCC(soundData=soundData)
-                    print(pitch, amplitude)
+                    print(ap.note, ap.pitch)
                 
     except KeyboardInterrupt:
         print("Done processing live data")
