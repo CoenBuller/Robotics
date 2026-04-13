@@ -30,6 +30,6 @@ We recommend using a conda environment:
 `conda create -n "env-name" python=3.11` <!-- You need python=3.11 for the library pyaudio -->
 
 `conda install numpy matplotlib` 
-<!-- `conda install -c conda-forge librosa` -->
+`conda install -c conda-forge librosa`
 <!-- `conda install -c main::pyaudio` -->
 `conda install -c conda-forge python-sounddevice`
