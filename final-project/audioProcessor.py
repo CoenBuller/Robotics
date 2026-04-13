@@ -29,7 +29,7 @@ class AudioProcessor:
 
         return hanningFft, dctFft, pitch, amplitude
 
-    def update_plot(self, frame, line, vline, audio_queue, plot=False):
+    def extract_data(self, frame, line, vline, audio_queue, plot=False):
         soundData = None
         while not audio_queue.empty():
             soundData = audio_queue.get()

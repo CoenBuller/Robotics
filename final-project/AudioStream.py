@@ -43,7 +43,7 @@ with stream:
     try:
         while True:
             soundData = None
-            ani = FuncAnimation(fig, ap.update_plot, fargs=(line, vline, audio_queue, args.plot), interval=30, blit=True)
+            ani = FuncAnimation(fig, ap.extract_data, fargs=(line, vline, audio_queue, args.plot), interval=30, blit=True)
             if args.plot:
                 plt.show()
                 
