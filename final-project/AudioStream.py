@@ -14,6 +14,6 @@ def callback(indata, outdata, frames, time, status):
     outdata[:] = indata
     print(len(indata))
     
-with sd.Stream(callback=callback):
+with sd.InputStream(callback=callback):
     sd.sleep(int(duration * 1000))
 
