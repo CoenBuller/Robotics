@@ -28,7 +28,6 @@ def safe_command(cmd_id):
         ROBOT_STATE = 'turning'
         print(">>> SPIN")
 
-
 last_detected = None
 
 while True:
@@ -41,7 +40,7 @@ while True:
         max_prob = np.max(probs)
         current_result = model.classes_[np.argmax(probs)]
 
-        if max_prob > 0.65 and current_result != 3:
+        if max_prob > 0.5 and current_result != 3:
             if current_result != last_detected:
                 print(f"\n{NAMES[current_result]} ({max_prob * 100:.1f}%)")
                 safe_command(current_result)
