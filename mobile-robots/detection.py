@@ -199,8 +199,8 @@ def observation_phase(cap):
         cv2.drawContours(fgmask, contours, -1, (0, 255), 3)
         cv2.imshow('Contours', fgmask)
 
-        cv2.imshow("Observation", frame)
-        cv2.imshow("FG Mask", fgmask)
+        # cv2.imshow("Observation", frame)
+        # cv2.imshow("FG Mask", fgmask)
 
         if cv2.waitKey(1) & 0xFF == 27:
             break
