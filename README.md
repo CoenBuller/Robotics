@@ -32,4 +32,4 @@ We recommend using a conda environment:
 `conda install numpy matplotlib` 
 `conda install -c conda-forge librosa`
 `conda install -c conda-forge python-sounddevice`
-`conda install -c main::pyaudio`
+<!-- `conda install -c main::pyaudio` -->
