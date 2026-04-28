@@ -4,21 +4,39 @@ import librosa as lb
 
 
 class AudioProcessor:
-    def __init__(self, blocksize=256, samplerate=4000):
-        self.pitch = 0
-        self.amp = 0
-        self.mfcc = None
+    def __init__(self, samplerate=4000, window_duration=1, chunk_duration=0.25, n_fft=4096, n_mels=13):
+        self.samplerate = samplerate
+        self.chunk_size = int(samplerate * chunk_duration)  # 1000 samples @ 4kHz
+        self.n_fft = n_fft                                  # Power of 2 → fast FFT
+        self.window_size = int(samplerate * window_duration)
+        self.n_mels = n_mels
+
+        self.window = np.zeros(self.window_size)
+
+        self.pitch = 0.0
+        self.amp = 0.0
         self.note = None
         self.octave = None
 
-        self.hanningWindow = np.hanning(blocksize)
+        # --- Precomputed constants ---
+        # Hanning sized to chunk, applied to time-domain signal (before FFT)
+        self.hanningWindow = np.hanning(self.window_size)
 
-        self.n_fft_internal = blocksize * 2 - 1
-        self.melFilters = lb.filters.mel(sr=samplerate, n_fft=self.n_fft_internal, n_mels=13)
-        self.x_fft = np.fft.rfftfreq(self.n_fft_internal, 1/samplerate)
+        # Mel filterbank expects n_fft//2 + 1 bins (rfft output size)
+        self.melFilters = lb.filters.mel(sr=samplerate, n_fft=n_fft, n_mels=n_mels)
+
+        # Frequency axis for rfft output
+        self.x_fft = np.fft.rfftfreq(n_fft, 1.0 / samplerate)
 
         self.notes = ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#']
         self.len_notes = len(self.notes)
+
+    
+    def update_window(self, frames):
+        frames = frames.flatten()
+        n = len(frames)
+        np.roll(self.window, -n)  # In-place roll, no allocation
+        self.window[-n:] = frames
 
     def freq_to_note(self, freq):
 
@@ -34,38 +52,38 @@ class AudioProcessor:
         
         return note, octave
 
-    def CalcMFCC(self, soundData: np.ndarray) -> tuple[np.ndarray,np.ndarray, int, int]:
-        fft = np.abs(np.fft.rfft(soundData.flatten(), n=len(self.hanningWindow)*2 - 1))
+    def CalcMFCC(self, soundData: np.ndarray, hop: int = 512) -> np.ndarray:
 
-        argmax_fft = np.argmax(fft)
-        pitch = self.x_fft[argmax_fft] # Calculates the pitch
+        sd = soundData.flatten()
+
+        # Avoid spectral leakage by using a hanning window
+        windowed = sd * self.hanningWindow     
+        fft = np.abs(np.fft.rfft(windowed, n=self.n_fft))
+
+        # Determine the peak frequence for pitch detection
+        argmax = np.argmax(fft)
+        pitch = self.x_fft[argmax]
+        amplitude = fft[argmax]
         self.note, self.octave = self.freq_to_note(pitch)
-        amplitude = fft[argmax_fft]
+        self.pitch, self.amp = pitch, amplitude
 
-        # Calculates the mfcc 
-        hanningFft = fft * self.hanningWindow
-        melFft = np.dot(self.melFilters, hanningFft)
-        dctFft = sp.fftpack.dct(melFft, type=2)
+        # MFCC extraction from the sound data
+        mfcc = lb.feature.mfcc(y=sd, sr=self.samplerate, n_mfcc=self.n_mels, hop_length=hop, norm='ortho')
 
-        return hanningFft, dctFft, pitch, amplitude
+
+        return mfcc
 
     def update_plot(self, frame, line, vline, audio_queue):
         soundData = None
         while not audio_queue.empty():
-            soundData = audio_queue.get()
+            soundData = audio_queue.get_nowait()
 
         if soundData is not None:
-            # Process data
             fft, mfcc, pitch, amp = self.CalcMFCC(soundData)
-            
-            # Store values for other functions to use
-            self.mfcc = mfcc
-            self.pitch = pitch
-            self.amp = amp
-
+            print(f"{self.octave} | {self.note} | {amp:.2f}")
             line.set_ydata(fft)
             vline.set_xdata([pitch, pitch])
-            
+
         return line, vline
 
     def other_function(self):
