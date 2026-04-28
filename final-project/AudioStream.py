@@ -1,15 +1,21 @@
 # I hate tensorflow warnings 
 import sounddevice as sd
 import numpy as np
+<<<<<<< HEAD
 import queue 
 import argparse
 import matplotlib.pyplot as plt
 import torch
 import os
+=======
+>>>>>>> 2e14eefbc6f316ec87e2ec2833358a3d78d6422e
 
-from matplotlib.animation import FuncAnimation
-from audioProcessor import AudioProcessor
+sd.default.samplerate = 16_000
+sd.default.channels = 1
+sd.default.blocksize = 256
+sd.default.dtype = np.int16
 
+<<<<<<< HEAD
 ##################### Argument Parser #####################
 parser = argparse.ArgumentParser()
 parser.add_argument("--d", type=int, help="Decide which device you want to record with (int)")
@@ -98,7 +104,16 @@ with stream:
                 
     except KeyboardInterrupt:
         print("Done processing live data")
+=======
+duration = 5 
+>>>>>>> 2e14eefbc6f316ec87e2ec2833358a3d78d6422e
 
+def callback(indata, outdata, frames, time, status):
+    if status:
+        print(status)
+    outdata[:] = indata
+    print(len(indata))
     
-
+with sd.Stream(callback=callback):
+    sd.sleep(int(duration * 1000))
 
