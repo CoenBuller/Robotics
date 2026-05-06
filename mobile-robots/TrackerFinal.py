@@ -97,7 +97,6 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
         int(iw * scale),
         int(ih * scale),
     )
-    ref_area = iw * ih
 
     small     = cv2.resize(frame, (Ws, Hs))
     small_hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV) # Use HSV instead of RGB -> More robust to varying lighting
@@ -108,10 +107,6 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
 
     # Initialize Kalman tracker
     kf = init_kalman(ix + iw / 2, iy + ih / 2)
-
-    init_pixel_dens = GetObjectDensity(frame, initial_bbox)
-    SHRUNK_PATIENCE = 10
-    shrunk_count    = SHRUNK_PATIENCE
 
     # Motor / control constants
     POWER_TURN    = 0.5
@@ -126,7 +121,6 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
     last_action     = None
     last_sent       = None
     action_start_t  = time.time()
-    proximity_stop  = False
 
     last_x = ix
     last_y = iy
@@ -176,7 +170,6 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                 if jump > 150: # Make shure the bbox does not move too much (e.g. false prediction)
                     success=False
 
-
                 cx, cy = x + w / 2, y + h / 2
                 meas      = np.array([[np.float32(cx)], [np.float32(cy)]])
                 estimated = kf.correct(meas).flatten()
@@ -199,7 +192,10 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                 if   err_x < -DEADBAND: target_action = ("TURN_LEFT",  POWER_TURN)
                 elif err_x >  DEADBAND: target_action = ("TURN_RIGHT", POWER_TURN)
                 elif err_y > DEADBAND:  target_action = ("FORWARD",    POWER_FORWARD)
+                else:                   target_action = ("STOP",       0)
 
+                # Record which action we took so we know how far we are in the ramping of the cars power
+                # This allows for smoother movement of the car
                 if last_action is None or last_action[0] != target_action[0]:
                     action_start_t = time.time()
                     last_action = target_action
@@ -208,8 +204,7 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                 t_in_action = time.time() - action_start_t
                 if t_in_action < RAMP_DURATION:
                     ramp_t = t_in_action / RAMP_DURATION
-                    ramped_power = int(RAMP_START_POWER +
-                                        ramp_t * (target_power - RAMP_START_POWER))
+                    ramped_power = int(RAMP_START_POWER + ramp_t * (target_power - RAMP_START_POWER))
                     ramped_power = max(RAMP_START_POWER,
                                         min(target_power, ramped_power))
                 else:
