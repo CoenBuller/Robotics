@@ -5,24 +5,34 @@ from threading import Thread
 import time
 
 def getAction(err_x, err_y, threshold_x, threshold_y, power_forward, power_turn):
+    
+    abs_x, abs_y = abs(err_x), abs(err_y)
+    
+    if abs_x < threshold_x and abs_y < threshold_y:  # Dont do anything if errors are not big enough
+        return ("STOP", 0)
 
-    if abs(err_x) < threshold_x and err_y < threshold_y:  # Dont do anything
-        return None, 0
+    # If the error on y is negative, move backwards, else move forward
+    if err_y < 0:
+        movey = ("BACKWARDS", power_forward)
+    else:
+        movey = ("FORWARD", power_forward)
 
-    if abs(err_x) < threshold_x: # If horizontally the object is close enough to center, move forward 
-        return ("FORWARD", power_forward)
+
+    if abs_x < threshold_x: # If horizontally the object is close enough to center, move forward 
+        return movey
     
     # If the error on x is negative, we have to move left, right otherwise
     if err_x < 0:
-        move = ("TURN_LEFT", power_turn)
+        movex = ("TURN_LEFT", power_turn)
     else: 
-        move = ("TURN_RIGHT", power_turn)
+        movex = ("TURN_RIGHT", power_turn)
+    
 
     # If the error on the horizontal position is larger than the veritcal position we turn. Move forward otherwise
-    if abs(err_x) > err_y: 
-        return move
+    if abs(err_x) > abs(err_y): 
+        return movex
     else:
-        return ("FORWARD", power_forward)
+        return movey
 
 
 def init_kalman(cx0, cy0):
@@ -146,7 +156,7 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                 continue
 
             # Kalman prediction (always runs, even when CSRT fails)
-            prediction = kf.predict()
+            prediction = kf.predict().flatten()
             pred_cx = float(prediction[0])
             pred_cy = float(prediction[1])
 
@@ -192,8 +202,8 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                 # Store Kalman position as reference for next frame's jump guard
                 last_kx, last_ky, last_w, last_h = kx, ky, w, h
 
-                err_x = est_cx - W / 2
-                err_y = H / 2 - est_cy   # positive when object is above frame centre
+                err_x = est_cx - init_cx
+                err_y = init_cy - est_cy   # positive when object is above frame centre
 
                 target_action = getAction(err_x, err_y, THRESHOLD_X, THRESHOLD_Y, POWER_FORWARD, POWER_TURN)
 
@@ -220,6 +230,7 @@ def Tracker(cam, initial_bbox, drive_motors=False, scale=0.5):
                         if   name == "TURN_LEFT" : fc.turn_left(power)
                         elif name == "TURN_RIGHT": fc.turn_right(power)
                         elif name == "FORWARD"   : fc.forward(power)
+                        elif name == "BACKWARDS" : fc.backward(power)
                         else                     : fc.stop()
                     last_sent = action_to_send
 
