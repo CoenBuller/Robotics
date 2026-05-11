@@ -16,7 +16,7 @@ sd.default.dtype = np.int16
 parser = argparse.ArgumentParser()
 parser.add_argument("--d", type=int, help="Decide which device you want to record with (int)")
 parser.add_argument("--samplerate", type=int, help="Devine the sample rate at which you want to record your audio (int)", default=16_000)
-parser.add_argument("--channels", type=int, help="Number of channels (int)", default=1)
+parser.add_argument("--channels", type=int, help="Number of channels (int)")
 parser.add_argument("--blocksize", type=int, help="Blocksize at which you want to process the sounddata", default=256)
 parser.add_argument("--duration", type=float, help="How long should the audio chunks be", default=1)
 parser.add_argument("--plot", type=str, help="Do you want to plot the frequency intesities", default="false")

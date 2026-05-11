@@ -3,7 +3,7 @@ from scipy.fft import rfft, rfftfreq
 import librosa
 import librosa.feature
 
-RATE = 44100
+RATE = 16000
 
 def extract_features(audio):
     audio = audio.flatten()

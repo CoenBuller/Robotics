@@ -74,14 +74,6 @@ def detect_object(cap, bg, min_area=500):
     largest = max(contours, key=score)
     x, y, w, h = cv2.boundingRect(largest)
 
-    # Real objects on the floor are rarely taller than 2.5x their width.
-    aspect = h / max(w, 1)
-    if aspect > 2.5:
-        h = int(h * 0.6)
-        # Recompute area; if too small now, reject.
-        if w * h < min_area:
-            return frame, None
-
     bbox = (int(x), int(y), int(w), int(h))
     return frame, bbox
 
