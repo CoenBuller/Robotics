@@ -4,7 +4,7 @@ import librosa as lb
 
 
 class AudioProcessor:
-    def __init__(self, samplerate=4000, window_duration=1, chunk_duration=0.25, n_fft=4096, n_mels=13):
+    def __init__(self, samplerate=16_000, window_duration=1, chunk_duration=0.25, n_fft=2048, n_mels=13):
         self.samplerate = samplerate
         self.chunk_size = int(samplerate * chunk_duration)  # 1000 samples @ 4kHz
         self.n_fft = n_fft                                  # Power of 2 → fast FFT
@@ -35,7 +35,7 @@ class AudioProcessor:
     def update_window(self, frames):
         frames = frames.flatten()
         n = len(frames)
-        np.roll(self.window, -n)  # In-place roll, no allocation
+        self.window = np.roll(self.window, -n)  # np.roll is NOT in-place; result must be assigned
         self.window[-n:] = frames
 
     def freq_to_note(self, freq):
@@ -70,7 +70,6 @@ class AudioProcessor:
         # MFCC extraction from the sound data
         mfcc = lb.feature.mfcc(y=sd, sr=self.samplerate, n_mfcc=self.n_mels, hop_length=hop, norm='ortho')
 
-
         return mfcc
 
     def update_plot(self, frame, line, vline, audio_queue):
@@ -79,10 +78,10 @@ class AudioProcessor:
             soundData = audio_queue.get_nowait()
 
         if soundData is not None:
-            fft, mfcc, pitch, amp = self.CalcMFCC(soundData)
-            print(f"{self.octave} | {self.note} | {amp:.2f}")
-            line.set_ydata(fft)
-            vline.set_xdata([pitch, pitch])
+            self.CalcMFCC(soundData)  # updates self.pitch, self.amp, self.note, self.octave
+            print(f"{self.octave} | {self.note} | {self.amp:.2f}")
+            line.set_ydata(self.amp)
+            vline.set_xdata([self.pitch, self.pitch])
 
         return line, vline
 
