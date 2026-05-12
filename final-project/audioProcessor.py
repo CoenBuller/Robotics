@@ -4,7 +4,7 @@ import librosa as lb
 
 
 class AudioProcessor:
-    def __init__(self, samplerate=16_000, window_duration=1, chunk_duration=0.25, n_fft=2048, n_mels=13):
+    def __init__(self, samplerate=15_872, window_duration=1, chunk_duration=0.25, n_fft=2048, n_mels=13):
         self.samplerate = samplerate
         self.chunk_size = int(samplerate * chunk_duration)  # 4000 samples @ 16kHz
         self.n_fft = n_fft                                  # Power of 2 → fast FFT

@@ -7,11 +7,11 @@ final_folder = os.path.join("final-project", "data_audio", "Background_Noise_Uni
 os.makedirs(final_folder, exist_ok=True)
 
 path = os.path.join("final-project", "achtergrond_uni_final_project.wav")
-audio = lb.load(path=path, sr=16_000)[0]
+audio = lb.load(path=path, sr=15_872)[0]
 
 
 
-def cutAudio(audio, durations=1, sr=16_000):
+def cutAudio(audio, durations=1, sr=15_872):
     audio_time = len(audio)/sr
     n_frames = int(audio_time/durations)
 

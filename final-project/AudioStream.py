@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 import os
 
-sd.default.samplerate = 16_000
+sd.default.samplerate = 15_872
 sd.default.channels = 1
 sd.default.blocksize = 256
 sd.default.dtype = np.int16
@@ -15,7 +15,7 @@ sd.default.dtype = np.int16
 ##################### Argument Parser #####################
 parser = argparse.ArgumentParser()
 parser.add_argument("--d", type=int, help="Decide which device you want to record with (int)")
-parser.add_argument("--samplerate", type=int, help="Devine the sample rate at which you want to record your audio (int)", default=16_000)
+parser.add_argument("--samplerate", type=int, help="Devine the sample rate at which you want to record your audio (int)", default=15_872)
 parser.add_argument("--channels", type=int, help="Number of channels (int)")
 parser.add_argument("--blocksize", type=int, help="Blocksize at which you want to process the sounddata", default=256)
 parser.add_argument("--duration", type=float, help="How long should the audio chunks be", default=1)
