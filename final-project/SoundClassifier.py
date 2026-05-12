@@ -10,28 +10,25 @@ class AudioCNN(nn.Module):
 
         self.n_classes = n_classes
         self.n_mfcc = n_mfcc
-        
-        self.features = nn.Sequential(
-            # Block 1 — local patterns (~3 frames)
-            nn.Conv1d(self.n_mfcc, 32, kernel_size=3, padding=1),
-            nn.BatchNorm1d(32),
+       
+        self.features = torch.nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(3,3), stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool1d(2),
-
-            # Block 2 — higher-level patterns
-            nn.Conv1d(32, 64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
+            nn.BatchNorm2d(num_features=16),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3,3), stride=1, padding=1),
             nn.ReLU(),
-            nn.MaxPool1d(2),
-        )
+            nn.BatchNorm2d(num_features=32),
+            nn.AdaptiveAvgPool2d(output_size=(1,1))
+        ) 
 
         self.classifier = nn.Sequential(
-            nn.Dropout(0.4),
-            nn.Linear(64, self.n_classes),
-            nn.Softmax(-1)
+            nn.Linear(in_features=32, out_features=4),
+            nn.Softmax(dim=-1)
         )
 
     def forward(self, x: Tensor):
+        # Input (x) shape: (B, 1, 13, 31)
         x = self.features(x)
-        x = x.mean(dim=-1)
-        return self.classifier(x)
+        # Features output shape: (B, 32, 1, 1)
+        x = x.squeeze()
+        return self.classifier(x) # Output shape : (B, 4)
