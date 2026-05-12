@@ -22,7 +22,7 @@ class AudioCNN(nn.Module):
         ) 
 
         self.classifier = nn.Sequential(
-            nn.Linear(in_features=32, out_features=4),
+            nn.Linear(in_features=32, out_features=n_classes),
             nn.Softmax(dim=-1)
         )
 
@@ -30,5 +30,5 @@ class AudioCNN(nn.Module):
         # Input (x) shape: (B, 1, 13, 31)
         x = self.features(x)
         # Features output shape: (B, 32, 1, 1)
-        x = x.squeeze()
+        x = x.flatten(1)
         return self.classifier(x) # Output shape : (B, 4)
