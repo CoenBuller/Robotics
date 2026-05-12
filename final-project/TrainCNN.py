@@ -37,9 +37,10 @@ def createSpectograms(audio_files: list[str]):
 
 
 class AudioDataset(Dataset):
-    def __init__(self, spectrograms, labels, augment=False):
-        self.X = spectrograms   # List of (13, 32) arrays
+    def __init__(self, files, labels, audio_processor, augment=False):
+        self.X = files # List of (13, 32) arrays
         self.y = labels
+        self.ap = audio_processor 
         self.augment = augment
 
     def _augment(self, x: np.ndarray) -> np.ndarray:
@@ -69,8 +70,8 @@ class AudioDataset(Dataset):
         return len(self.X)
 
 
-def train(spectrograms, labels, n_classes, epochs=100, lr=1e-3):
-    dataset = AudioDataset(spectrograms, labels, augment=True)
+def train(files, audio_processor, labels, n_classes, epochs=100, lr=1e-3):
+    dataset = AudioDataset(files, labels, audio_processor, augment=True)
     loader  = DataLoader(dataset, batch_size=16, shuffle=True)
 
     model = AudioCNN(n_classes=n_classes)
