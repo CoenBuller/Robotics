@@ -6,7 +6,7 @@ from tqdm import tqdm
 final_folder = os.path.join("final-project", "data_audio", "Background_Noise_Uni")
 os.makedirs(final_folder, exist_ok=True)
 
-path = os.path.join("final-project", "achtergrond_uni_final_project.wav")
+path = "achtergrond_uni_final_project.wav"
 audio = lb.load(path=path, sr=15_872)[0]
 
 

@@ -26,7 +26,7 @@ def createLabels(audio_files: list[str], classes: list[str]):
     return files, labels
 
 def createSpectograms(audio_files: list[str]):
-    ap = AudioProcessor(samplerate=16_000, window_duration=1, chunk_duration=0.25)
+    ap = AudioProcessor(samplerate=15_872, window_duration=1, chunk_duration=0.25)
     spectorgrams = []
     for f in audio_files:
         d, _ = lb.load(f, sr=ap.samplerate, duration=1)
