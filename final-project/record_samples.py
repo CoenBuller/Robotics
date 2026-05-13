@@ -24,11 +24,11 @@ def record_one(label, number):
 
 
 for c in classes:
-    if c != "whistle":
+    if c != "whistle" and c != "harmonica":
         continue
 
     print(f"--- Starting {c.upper()} ---")
-    for i in range(40, 60):
+    for i in range(60, 80):
         record_one(c, i)
 
 print("All samples recorded successfully.")

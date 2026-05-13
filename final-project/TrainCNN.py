@@ -40,7 +40,7 @@ class AudioDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.X[idx]
-        audio_data, sr = lb.load(path=x, sr=self.aa.processor.samplerate, duration=1)
+        audio_data, sr = lb.load(path=x, sr=self.aa.sr, duration=1)
 
         #  If audio is not exactly 1 second long, we pad the audio data so it can be processed by the network
         audio_len = len(audio_data)
@@ -50,9 +50,9 @@ class AudioDataset(Dataset):
 
         # Can choose if we want to augment the data or not
         if not self.augment:
-            x = self.aa.process(audio=audio_data, hop=self.hop, noise=False, pitch=False, volume=False, spec_aug=False)
+            x = self.aa.process(audio=audio_data, noise=False, pitch=False, volume=False, spec_aug=False)
         else:
-            x = self.aa.process(audio=audio_data, hop=self.hop, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug)
+            x = self.aa.process(audio=audio_data, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug)
 
 
         return torch.tensor(x, dtype=torch.float32).unsqueeze(0), self.y[idx] # Data has shape of (1, 13, 31)
@@ -101,9 +101,9 @@ def train(files, labels, audio_processor, n_classes, epochs=100, lr=1e-3):
 
 if __name__ == "__main__":
 
-    classes = ["whistle", "harmonica", "silence", "clap"]
+    # classes = ["whistle", "harmonica", "silence", "clap"]
 
-    data_folder = "final-project/data_audio"
+    data_folder = "data"
     class_folders = os.listdir(data_folder)
 
     audio_files = []
@@ -122,17 +122,16 @@ if __name__ == "__main__":
     print(np.unique(labels))
     cfg = AugmentConfig(noise_prob=0.5, 
                         noise_snr_range=(10, 30),
-                        pitch_shift_prob=0.25,
+                        pitch_shift_prob=0.4,
                         pitch_shift_range=(-3, 3),
-                        volume_scale_prob=0.33,
+                        volume_scale_prob=0.4,
                         volume_gain_range=(0.5, 1.5),
                         spec_augment_prob=0.6,
                         n_freq_masks=1,
-                        freq_mask_param=3,
+                        freq_mask_param=1,
                         n_time_masks=1,
-                        time_mask_param=10)
+                        time_mask_param=1)
 
-    p = AudioProcessor()
-    ap = AudioAugmentationPipeline(p, config=cfg)
+    ap = AudioAugmentationPipeline(config=cfg)
     model = train(files=audio_files, labels=labels, audio_processor=ap, n_classes=4, epochs=500)
     torch.save(model, os.path.join("final-project","models", "cnn_model"))

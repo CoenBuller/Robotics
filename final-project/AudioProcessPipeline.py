@@ -26,9 +26,9 @@ class AugmentConfig:
     # --- SpecAugment ---
     spec_augment_prob:  float = 0.5
     n_freq_masks:       int   = 1
-    freq_mask_param:    int   = 3    # max mel bands to zero out per mask
+    freq_mask_param:    int   = 1    # max mel bands to zero out per mask
     n_time_masks:       int   = 1
-    time_mask_param:    int   = 10   # max time frames to zero out per mask
+    time_mask_param:    int   = 5   # max time frames to zero out per mask
 
 
 class AudioProcessor:
@@ -116,11 +116,17 @@ class AudioAugmentationPipeline:
  
     def __init__(
         self,
-        processor: AudioProcessor,
+        sr: int = 15_872,
+        n_mels: int = 13,
+        hop: int = 512,
         config: Optional[AugmentConfig] = None,
         seed: Optional[int] = None,
     ):
-        self.processor = processor
+        self.sr = sr
+        self.n_mels = n_mels
+        self.hop = hop
+        self.hanningWindow = np.hanning(sr)
+
         self.config    = config or AugmentConfig()
  
         if seed is not None:
@@ -157,7 +163,7 @@ class AudioAugmentationPipeline:
         """Shift pitch by *n_steps* semitones without affecting duration."""
         return lb.effects.pitch_shift(
             audio.astype(np.float32),
-            sr=self.processor.samplerate,
+            sr=self.sr,
             n_steps=n_steps,
         ).astype(np.float64)
  
@@ -165,6 +171,7 @@ class AudioAugmentationPipeline:
         """Multiply amplitude by *gain* and hard-clip to [-1, 1]."""
         return np.clip(audio * gain, -1.0, 1.0)
  
+
     # Feature-level augmentation (private) 
     def _spec_augment(self, mfcc: np.ndarray) -> np.ndarray:
         """
@@ -187,10 +194,28 @@ class AudioAugmentationPipeline:
             mfcc[:, t0 : t0 + t] = 0.0
  
         return mfcc
- 
     
+    def process_audio(self, audio: np.ndarray, noise: bool=True, pitch: bool=True, volume: bool=True):
+        cfg = self.config
+        audio = audio.flatten().astype(np.float64)
+
+        # 1 ── Noise
+        if random.random() < cfg.noise_prob and noise:
+            pool = list(cfg.noise_types)
+            audio = self._add_noise(audio, random.uniform(*cfg.noise_snr_range), random.choice(pool))
+ 
+        # 3 ── Pitch shift
+        if random.random() < cfg.pitch_shift_prob and pitch:
+            audio = self._pitch_shift(audio, random.uniform(*cfg.pitch_shift_range))
+ 
+        # 4 ── Volume scaling
+        if random.random() < cfg.volume_scale_prob and volume:
+            audio = self._volume_scale(audio, random.uniform(*cfg.volume_gain_range))
+    
+        return audio
+
     # Public API 
-    def process(self, audio: np.ndarray, hop: int = 512, noise=True, pitch=True, volume=True, spec_aug=True) -> np.ndarray:
+    def process(self, audio: np.ndarray, noise=True, pitch=True, volume=True, spec_aug=True) -> np.ndarray:
         """
         Apply stochastic augmentations to a raw waveform and return MFCCs.
         """
@@ -211,8 +236,8 @@ class AudioAugmentationPipeline:
             audio = self._volume_scale(audio, random.uniform(*cfg.volume_gain_range))
  
         # 5 ── Extract MFCCs (via AudioProcessor)
-        mfcc = self.processor.CalcMFCC(audio, hop=hop)
- 
+        mfcc = lb.feature.mfcc(y=audio, sr=self.sr, n_mfcc=self.n_mels, hop_length=self.hop, norm='ortho')
+
         # 6 ── SpecAugment
         if random.random() < cfg.spec_augment_prob and spec_aug:
             mfcc = self._spec_augment(mfcc)

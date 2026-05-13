@@ -5,7 +5,7 @@ from torch import Tensor
 from torch import nn
 
 class AudioCNN(nn.Module):
-    def __init__(self, n_classes: int, n_mfcc: int = 13):
+    def __init__(self, n_classes: int, n_mfcc: int = 62):
         super().__init__()
 
         self.n_classes = n_classes
@@ -27,7 +27,7 @@ class AudioCNN(nn.Module):
         )
 
     def forward(self, x: Tensor):
-        # Input (x) shape: (B, 1, 13, 31)
+        # Input (x) shape: (B, 1, 62, 31)
         x = self.features(x)
         # Features output shape: (B, 32, 1, 1)
         x = x.flatten(1)
