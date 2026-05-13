@@ -2,8 +2,10 @@ import sounddevice as sd
 import os
 from scipy.io import wavfile
 
-RATE = 16_000
+RATE = 15_872
 DURATION = 1.0
+
+print(sd.query_devices()) # Uncommend if you want to know which audio device is being used. 
 
 classes = ['clap', 'whistle', 'harmonica', 'silence']
 for c in classes:
@@ -22,10 +24,11 @@ def record_one(label, number):
 
 
 for c in classes:
-    # if c != "harmonica":
-    #     continue
+    if c != "whistle":
+        continue
+
     print(f"--- Starting {c.upper()} ---")
-    for i in range(20):
+    for i in range(40, 60):
         record_one(c, i)
 
 print("All samples recorded successfully.")

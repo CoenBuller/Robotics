@@ -3,10 +3,10 @@ from scipy.io import wavfile
 import os
 from tqdm import tqdm
 
-final_folder = os.path.join("final-project", "data_audio", "Background_Noise_Uni")
-os.makedirs(final_folder, exist_ok=True)
+final_folder = os.path.join("data", "silence")
+# os.makedirs(final_folder, exist_ok=True)
 
-path = "achtergrond_uni_final_project.wav"
+path = "BG_uni_1.wav"
 audio = lb.load(path=path, sr=15_872)[0]
 
 
@@ -16,10 +16,10 @@ def cutAudio(audio, durations=1, sr=15_872):
     n_frames = int(audio_time/durations)
 
     for i in tqdm(range(n_frames)):
-        lower, upper = i * sr, (i+1) * sr
+        lower, upper = i * sr*durations, (i+1) * sr * durations
         y = audio[lower: upper]
         path = f"BG_uni_{i}.wav"
-        path = os.path.join("final-project", "data_audio", "Background_Noise_Uni", path)
+        path = os.path.join(final_folder, path)
         wavfile.write(path, sr, y)
 
 cutAudio(audio)
