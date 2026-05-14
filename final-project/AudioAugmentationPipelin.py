@@ -136,7 +136,7 @@ class AudioAugmentationPipeline:
         
 
     # Public API 
-    def process(self, audio: np.ndarray, noise=True, pitch=True, volume=True, spec_aug=True, time_shift=True, polarity_flip=True, higher_noise=False) -> np.ndarray:
+    def process(self, audio: np.ndarray, noise=True, pitch=True, volume=True, spec_aug=True, time_shift=True, polarity_flip=True, extra_noise=False) -> np.ndarray:
         """
         Apply stochastic augmentations to a raw waveform and return MFCCs.
         """
@@ -147,7 +147,7 @@ class AudioAugmentationPipeline:
         if random.random() < cfg.noise_prob and noise:
             pool = list(cfg.noise_types)
             delta = 0
-            if higher_noise:
+            if extra_noise:
                 delta = 5
             audio = self._add_noise(audio, random.uniform(*cfg.noise_snr_range)-delta, random.choice(pool))
  
