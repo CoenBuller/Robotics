@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import torch
 import os
 
+from AudioProcessPipeline import AudioProcessor
+
 sd.default.samplerate = 15_872
 sd.default.channels = 1
 sd.default.blocksize = 256
@@ -34,28 +36,22 @@ sd.default.channels = args.channels
 sd.default.blocksize = int(args.samplerate * args.callback_time)
 sd.default.dtype = np.int16 
 
+
 ##################### Setup Queue and Audio Processor #####################
 audio_queue = queue.Queue()
 ap = AudioProcessor(
                     samplerate=args.samplerate, 
                     chunk_duration=args.callback_time, 
                     n_fft=1024, 
-                    n_mels=13
+                    n_mels=62
                     )
+
 
 ##################### Load Model #####################
 model = torch.load(os.path.join("final-project","models", "cnn_model"), weights_only=False)
 model.eval()
-CLASSES = {0 : "Whistle", 1: "harmonica", 2: "silence", 3: "clap"}
+CLASSES = {0 : "clap", 1: "harmonica", 2: "silence", 3: "whistle"}
 
-##################### Initialize Figure #####################
-fig, ax = plt.subplots()
-line, = ax.plot(ap.x_fft, np.zeros(len(ap.x_fft)))
-vline = ax.axvline(x=0, color='r', linestyle='--')
-
-ax.set_ylim(0, 100000) # Adjust based on expected volume
-ax.set_title("Live FFT")
-ax.set_xlabel("Frequency (Hz)")
 
 ##################### Callback Function for Processing Input #####################
 def callback(indata, frames, time, status):
@@ -63,50 +59,31 @@ def callback(indata, frames, time, status):
         print(status)
     audio_queue.put(indata.copy()) # Puts data into queue
 
+
 ##################### Initialize and Start Stream #####################
 stream = sd.InputStream(device=args.d, channels=1, callback=callback)
 sound = None
 with stream:
     print('listening')
     try:
-        if plot:
-            # FuncAnimation is blocking via plt.show() — set up once, outside the loop
-            ani = FuncAnimation(
-                fig, ap.update_plot,
-                fargs=(line, vline, audio_queue),
-                interval=30,
-                blit=True
-            )
-            plt.show() 
-        else:
-            while True:
-                try:
-                    # Block until data arrives (up to 0.5s), avoiding busy-wait
-                    chunk = audio_queue.get(timeout=0.5)
-                except queue.Empty:
-                    continue  # No data yet, loop back and wait
+        while True:
+            try:
+                # Block until data arrives (up to 0.5s), avoiding busy-wait
+                chunk = audio_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue  # No data yet, loop back and wait
 
-                ap.update_window(chunk)
-                mfcc = torch.tensor(ap.CalcMFCC(soundData=ap.window, hop=512), dtype=torch.float32)[None, ...]
-                with torch.no_grad():
-                    m = model(mfcc)
-                    pred = torch.argmax(model(mfcc)).item()
-                    s = CLASSES[pred]
+            ap.update_window(chunk)
+            mfcc = torch.tensor(ap.CalcMFCC(soundData=ap.window, hop=512), dtype=torch.float32)[None, ...]
+            with torch.no_grad():
+                m = model(mfcc)
+                pred = torch.argmax(model(mfcc)).item()
+                s = CLASSES[pred]
 
-                    # if s != sound:
-                    print(f"Detecting {m}")
-                        # sound = s
+                # if s != sound:
+                print(f"Detecting {m}")
 
-                
     except KeyboardInterrupt:
         print("Done processing live data")
 
-def callback(indata, outdata, frames, time, status):
-    if status:
-        print(status)
-    outdata[:] = indata
-    print(len(indata))
-    
-with sd.Stream(callback=callback):
-    sd.sleep(int(duration * 1000))
 

@@ -46,7 +46,7 @@ class AudioDataset(Dataset):
         audio_len = len(audio_data)
         if audio_len < sr:
             d = sr - audio_len
-            audio_data = np.pad(audio_data, pad_width=(0, d))
+            audio_data = np.pad(audio_data, pad_width=(0, d)) # type: ignore
 
         # Can choose if we want to augment the data or not
         if not self.augment:
