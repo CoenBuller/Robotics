@@ -1,6 +1,7 @@
 import sounddevice as sd
 import os
 from scipy.io import wavfile
+import time
 
 RATE = 15_872
 DURATION = 1.0
@@ -14,7 +15,8 @@ for c in classes:
 
 def record_one(label, number):
     input(f"[{label.upper()} {number + 1}/20] Press Enter to record...")
-
+    time.sleep(0.2)
+    print("recording")
     audio = sd.rec(int(DURATION * RATE), samplerate=RATE, channels=1, dtype='float32')
     sd.wait()
 
@@ -24,11 +26,11 @@ def record_one(label, number):
 
 
 for c in classes:
-    if c != "whistle" and c != "harmonica":
+    if c != "harmonica":
         continue
 
     print(f"--- Starting {c.upper()} ---")
-    for i in range(60, 80):
+    for i in range(80, 100):
         record_one(c, i)
 
 print("All samples recorded successfully.")

@@ -2,14 +2,14 @@ import librosa as lb
 import numpy as np
 import matplotlib.pyplot as plt
 
-from AudioProcessPipeline import AudioAugmentationPipeline, AugmentConfig
+from AudioAugmentationPipelin import AudioAugmentationPipeline, AugmentConfig
 from scipy.io.wavfile import write
 
 
-# audio_file = "data/harmonica/harmonica_67.wav"
-# audio_file = "data/clap/clap_1.wav"
-audio_file = "data/whistle/whistle_2.wav"
-# audio_file = "data/silence/BG_uni_1000.wav"
+# audio_file = "data/harmonica/harmonica_7.wav"
+# audio_file = "data/clap/clap_19.wav"
+# audio_file = "data/whistle/whistle_20.wav"
+audio_file = "data/silence/BG_uni_1000.wav"
 audio, sr = lb.load(path=audio_file, sr=15872, duration=1)
 
 
@@ -21,11 +21,13 @@ cfg = AugmentConfig(
                     n_freq_masks=2, freq_mask_param=6,
                     n_time_masks=2, time_mask_param=6,
                     )
-ap = AudioAugmentationPipeline(hop=512, n_mels=13)
-augmented_audio = ap.process_audio(audio=audio)
-# plt.imshow(mfcc[1:])
-# plt.show()
-augmented_audio = np.int16(augmented_audio * 32767)
 
-write(filename="test.wav", rate=15872, data=augmented_audio)
+ap = AudioAugmentationPipeline(hop=512, n_fft=512, n_mels=62)
+log_mel = ap.process(audio=audio)[0]
+print(log_mel.shape)
+plt.imshow(log_mel)
+plt.show()
+# augmented_audio = np.int16(augmented_audio * 32767)
+
+# write(filename="test.wav", rate=15872, data=augmented_audio)
 

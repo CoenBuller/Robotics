@@ -7,34 +7,51 @@ import torch.onnx
 from onnxruntime.quantization import quantize_dynamic, QuantType
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-from SoundClassifier import AudioCNN
+from SoundClassifier2 import AudioCNN
 from torch import nn
-from AudioProcessPipeline import AudioAugmentationPipeline, AudioProcessor, AugmentConfig
+from AudioAugmentationPipelin import AudioAugmentationPipeline, AugmentationScheduler
+from config import AugmentConfig
 
 
-def export_for_pi(model, save_dir: str, quantize: bool = True):
+def export_for_pi(model, filename: str, quantize: bool = True):
     model.eval()
 
-    dummy = torch.randn(1, 1, 62, 32)
-    path = os.path.join(save_dir, "cnn_model.onnx")
+    # Create export directory
+    save_dir = "final-project/models/onnx_cnn_model"
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Dummy input matching your expected input dimensions
+    dummy = torch.randn(1, 2, 62, 32) 
+
+    # Export ONNX with Opset 13
+    onnx_path = os.path.join(save_dir, filename)
 
     torch.onnx.export(
-        model, (dummy,), path,
+        model,
+        (dummy,),
+        onnx_path,
         input_names=["melspec"],
         output_names=["logits"],
-        dynamic_axes={"melspec": {0: "batch"}},
-        opset_version=17,
+        opset_version=13,
+        dynamo=False,  
+        dynamic_axes={
+            'melspec': {0: 'batch_size'},
+            'logits': {0: 'batch_size'}
+        }
     )
-    print(f"Exported to {path}")
 
-    if quantize:
-        quant_path = os.path.join(save_dir, "cnn_model_int8.onnx")
-        quantize_dynamic(
-            model_input=path,
-            model_output=quant_path,
-            weight_type=QuantType.QInt8,
-        )
-        print(f"Quantized model saved to {quant_path}")
+    print("Saved:", onnx_path)
+
+    # Quantize
+    quant_path = os.path.join(save_dir, filename.rstrip(".onnx") + "_int8.onnx")
+    quantize_dynamic(
+        model_input=onnx_path,
+        model_output=quant_path,
+        weight_type=QuantType.QInt8,
+    )
+    print("Saved quantized:", quant_path)
+
+
 
 def createLabels(audio_files: list[str], classes: list[str]):
     classes_dict = {c: i for i, c in enumerate(classes)}
@@ -50,40 +67,6 @@ def createLabels(audio_files: list[str], classes: list[str]):
 
     return files, labels
 
-
-class AudioDataset(Dataset):
-    def __init__(self, files: list[str], labels: list[int], audio_augmenter: AudioAugmentationPipeline, hop: int = 512, augment: bool = True, noise: bool = True, pitch: bool = True, volume: bool = True, spec_aug: bool = True):
-        self.X = files
-        self.y = labels
-        self.aa = audio_augmenter
-        self.augment = augment
-        self.hop = hop
-        self.noise = noise
-        self.pitch = pitch
-        self.volume = volume
-        self.spec_aug = spec_aug
-
-    def __getitem__(self, idx):
-        x = self.X[idx]
-        audio_data, sr = lb.load(path=x, sr=self.aa.sr, duration=1)
-
-        # If audio is not exactly 1 second long, pad so it can be processed by the network
-        audio_len = len(audio_data)
-        if audio_len < sr:
-            d = sr - audio_len
-            audio_data = np.pad(audio_data, pad_width=(0, d)) # type: ignore
-
-        if not self.augment:
-            x = self.aa.process(audio=audio_data, noise=False, pitch=False, volume=False, spec_aug=False)
-        else:
-            x = self.aa.process(audio=audio_data, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug)
-
-        return torch.tensor(x, dtype=torch.float32).unsqueeze(0), self.y[idx]  # (1, 62, 32)
-
-    def __len__(self):
-        return len(self.X)
-
-
 def _class_accuracy_table(class_correct: np.ndarray, class_total: np.ndarray, class_names: list[str]) -> str:
     """Return a compact per-class accuracy string for tqdm.write."""
     col_w = max(len(n) for n in class_names) + 2
@@ -96,74 +79,49 @@ def _class_accuracy_table(class_correct: np.ndarray, class_total: np.ndarray, cl
     return f"  {header}\n  {row}"
 
 
-class AugmentationScheduler:
-    """
-    Upgrades augmentation difficulty in stages as epoch accuracy crosses
-    predefined thresholds.  Each stage is a full AugmentConfig; once a
-    threshold is reached the scheduler replaces the pipeline's config and
-    never steps down again (one-way ratchet).
 
-    Thresholds are expressed as fractions (0–1).  Adjust the stage configs
-    below to match your data and pipeline's parameter names.
-    """
+class AudioDataset(Dataset):
+    def __init__(self, files: list[str], labels: list[int], audio_augmenter: AudioAugmentationPipeline, hop: int = 512, augment: bool = True, noise: bool = True, pitch: bool = True, volume: bool = True, spec_aug: bool = True, timeshift: bool = True):
+        self.X = files
+        self.y = labels
+        self.aa = audio_augmenter
+        self.augment = augment
+        self.hop = hop
+        self.noise = noise
+        self.pitch = pitch
+        self.volume = volume
+        self.spec_aug = spec_aug
+        self.timeshift = timeshift
 
-    def __init__(self, pipeline: AudioAugmentationPipeline):
-        self.pipeline = pipeline
-        self.current_stage = 0
+    def __getitem__(self, idx):
+        x = self.X[idx]
+        audio_data, sr = lb.load(path=x, sr=self.aa.sr, duration=1)
 
-        # ── Curriculum stages ─────────────────────────────────────────────────
-        # Stage 0  (< 50 %)  – gentle: low probs, tight ranges
-        # Stage 1  (≥ 50 %)  – moderate: higher probs, wider ranges
-        # Stage 2  (≥ 70 %)  – hard: aggressive everything
-        # Stage 3  (≥ 85 %)  – brutal: maximum pressure, more masks
-        self.stages = [
-            # threshold, config
-            (0.50, AugmentConfig(
-                noise_prob=0.5,       noise_snr_range=(15, 30),
-                pitch_shift_prob=0.4, pitch_shift_range=(-2, 2),
-                volume_scale_prob=0.4, volume_gain_range=(0.7, 1.3),
-                spec_augment_prob=0.5,
-                n_freq_masks=1, freq_mask_param=2,
-                n_time_masks=1, time_mask_param=2,
-            )),
-            (0.70, AugmentConfig(
-                noise_prob=0.65,      noise_snr_range=(10, 25),
-                pitch_shift_prob=0.55, pitch_shift_range=(-3, 3),
-                volume_scale_prob=0.55, volume_gain_range=(0.6, 1.4),
-                spec_augment_prob=0.65,
-                n_freq_masks=1, freq_mask_param=4,
-                n_time_masks=1, time_mask_param=4,
-            )),
-            (0.85, AugmentConfig(
-                noise_prob=0.80,      noise_snr_range=(5, 20),
-                pitch_shift_prob=0.70, pitch_shift_range=(-5, 5),
-                volume_scale_prob=0.70, volume_gain_range=(0.3, 1.5),
-                spec_augment_prob=0.80,
-                n_freq_masks=2, freq_mask_param=6,
-                n_time_masks=2, time_mask_param=6,
-            )),
-        ]
-        # ─────────────────────────────────────────────────────────────────────
+        # If audio is not exactly 1 second long, pad so it can be processed by the network
+        audio_len = len(audio_data)
+        if audio_len < sr:
+            d = sr - audio_len
+            audio_data = np.pad(audio_data, pad_width=(0, d)) # type: ignore
 
-    def step(self, epoch_acc: float) -> bool:
-        """
-        Call once per epoch with the overall accuracy (0–1).
-        Returns True and logs a message if a new stage was unlocked.
-        """
-        if self.current_stage >= len(self.stages):
-            return False  # Already at maximum difficulty
+        is_clap = (self.y[idx] == 0)
 
-        threshold, new_cfg = self.stages[self.current_stage]
-        if epoch_acc >= threshold:
-            self.pipeline.config = new_cfg
-            stage_num = self.current_stage + 1
-            self.current_stage += 1
-            tqdm.write(
-                f"\n  ▲ Augmentation unlocked stage {stage_num} "
-                f"(acc {epoch_acc * 100:.1f}% ≥ {threshold * 100:.0f}%)\n"
-            )
-            return True
-        return False
+        x = self.aa.process(
+            audio=audio_data,
+            noise=True,
+            pitch=not is_clap,      # pitch shift is less meaningful for claps
+            volume=True,
+            spec_aug=True,
+            time_shift=True,
+            polarity_flip=is_clap,  # free augmentation, very effective for claps
+            extra_noise=is_clap,    # slightly heavier noise for clap only
+        )
+
+        x = self.aa.process(audio=audio_data, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug, time_shift=self.timeshift)
+
+        return torch.tensor(x, dtype=torch.float32), self.y[idx]  # (2, 62, 32)
+
+    def __len__(self):
+        return len(self.X)
 
 
 def train(files, labels, audio_processor, n_classes, class_names: list[str] | None = None, epochs=500, lr=3e-3):
@@ -181,15 +139,7 @@ def train(files, labels, audio_processor, n_classes, class_names: list[str] | No
     steps_per_epoch = len(loader)
 
     model = AudioCNN(n_classes=n_classes)
-
-    # ── Hyperparameter choices ────────────────────────────────────────────────
-    # AdamW with slightly higher weight_decay (1e-3) for better regularisation
-    # on small audio datasets.
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
-
-    # OneCycleLR: warms up to max_lr then cosine-anneals to near-zero.
-    # Far more effective than ReduceLROnPlateau for fixed-epoch training runs;
-    # eliminates the need to hand-tune patience.
     sched = torch.optim.lr_scheduler.OneCycleLR(
         opt,
         max_lr=lr,
@@ -204,10 +154,8 @@ def train(files, labels, audio_processor, n_classes, class_names: list[str] | No
     # Label smoothing (0.1) acts as a regulariser and prevents over-confident
     # predictions — especially useful when the dataset is small.
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
-    # ─────────────────────────────────────────────────────────────────────────
 
     aug_scheduler = AugmentationScheduler(audio_processor)
-
     epoch_bar = tqdm(range(epochs), desc="Epochs", position=0)
 
     for epoch in epoch_bar:
@@ -296,19 +244,18 @@ if __name__ == "__main__":
     print(f"Classes: {class_folders}")
     print(np.unique(labels))
 
-    cfg = AugmentConfig(noise_prob=0.5,
-                        noise_snr_range=(10, 30),
-                        pitch_shift_prob=0.4,
-                        pitch_shift_range=(-3, 3),
-                        volume_scale_prob=0.4,
-                        volume_gain_range=(0.5, 1.5),
-                        spec_augment_prob=0.6,
-                        n_freq_masks=1,
-                        freq_mask_param=1,
-                        n_time_masks=1,
-                        time_mask_param=1)
+    cfg = AugmentConfig(                
+                        noise_prob=0.4,       noise_snr_range=(20, 30),
+                        pitch_shift_prob=0.4, pitch_shift_range=(-1, 1),
+                        time_shift_prob=0.3, time_shift_range=(-0.1, 0.1),
+                        volume_scale_prob=0.4, volume_gain_range=(0.8, 1.2),
+                        spec_augment_prob=0.2,
+                        n_freq_masks=1, freq_mask_param=1,
+                        n_time_masks=1, time_mask_param=1,
+                        mixup_prob=0.4, alpha=0.2
+                        )
 
-    ap = AudioAugmentationPipeline(config=cfg, n_mels=62)
+    ap = AudioAugmentationPipeline(config=cfg, n_mels=62, hop=512, n_fft=512, sr=15_872)
     model = train(
         files=audio_files,
         labels=labels,
@@ -317,5 +264,5 @@ if __name__ == "__main__":
         class_names=class_folders,
         epochs=250,
     )
-    torch.save(model, os.path.join("final-project", "models", "cnn_model"))
-    export_for_pi(model, save_dir=os.path.join("final-project", "models", "onnx_cnn_model"))
+    torch.save(model, os.path.join("final-project", "models", "cnn_model2"))
+    export_for_pi(model, filename="onnx_cnn_model2")

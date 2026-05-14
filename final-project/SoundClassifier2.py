@@ -11,7 +11,7 @@ class AudioCNN(nn.Module):
         self.n_mfcc = n_mfcc
        
         self.features = torch.nn.Sequential(
-            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=(3,3), stride=1, padding=1),
+            nn.Conv2d(in_channels=2, out_channels=16, kernel_size=(3,3), stride=1, padding=1),
             nn.ReLU(),
             nn.BatchNorm2d(num_features=16),
             nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3,3), stride=1, padding=1),
@@ -21,6 +21,7 @@ class AudioCNN(nn.Module):
         ) 
 
         self.classifier = nn.Sequential(
+            nn.Dropout(p=0.4),
             nn.Linear(in_features=32, out_features=n_classes),
             nn.Softmax(dim=-1)
         )
