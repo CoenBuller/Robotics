@@ -15,7 +15,7 @@ from AudioProcessPipeline import AudioAugmentationPipeline, AudioProcessor, Augm
 def export_for_pi(model, save_dir: str, quantize: bool = True):
     model.eval()
 
-    dummy = torch.randn(1, 1, 13, 31)
+    dummy = torch.randn(1, 1, 62, 32)
     path = os.path.join(save_dir, "cnn_model.onnx")
 
     torch.onnx.export(
@@ -78,7 +78,7 @@ class AudioDataset(Dataset):
         else:
             x = self.aa.process(audio=audio_data, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug)
 
-        return torch.tensor(x, dtype=torch.float32).unsqueeze(0), self.y[idx]  # (1, 13, 31)
+        return torch.tensor(x, dtype=torch.float32).unsqueeze(0), self.y[idx]  # (1, 62, 32)
 
     def __len__(self):
         return len(self.X)

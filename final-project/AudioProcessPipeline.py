@@ -32,10 +32,10 @@ class AugmentConfig:
 
 
 class AudioProcessor:
-    def __init__(self, samplerate=15_872, window_duration=1, chunk_duration=0.25, n_fft=2048, n_mels=13):
+    def __init__(self, samplerate=15_872, window_duration=1, chunk_duration=0.25, n_fft=2048, n_mels=62):
         self.samplerate = samplerate
-        self.chunk_size = int(samplerate * chunk_duration)  # 4000 samples @ 16kHz
-        self.n_fft = n_fft                                  # Power of 2 → fast FFT
+        self.chunk_size = int(samplerate * chunk_duration)  
+        self.n_fft = n_fft                                  
         self.window_size = int(samplerate * window_duration)
         self.n_mels = n_mels
 
@@ -98,7 +98,7 @@ class AudioProcessor:
         # MFCC extraction from the sound data
         mfcc = lb.feature.mfcc(y=sd, sr=self.samplerate, n_mfcc=self.n_mels, hop_length=hop, norm='ortho')
 
-        return mfcc
+        return mfcc.astype(dtype=np.float32)
 
     def other_function(self):
         # This function can access the latest data whenever it wants

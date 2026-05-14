@@ -3,10 +3,11 @@ import sounddevice as sd
 import numpy as np
 import queue 
 import argparse
-import matplotlib.pyplot as plt
 import torch
 import os
+from time import time
 
+import onnxruntime as ort
 from AudioProcessPipeline import AudioProcessor
 
 sd.default.samplerate = 15_872
@@ -42,15 +43,20 @@ audio_queue = queue.Queue()
 ap = AudioProcessor(
                     samplerate=args.samplerate, 
                     chunk_duration=args.callback_time, 
-                    n_fft=1024, 
+                    n_fft=2048, 
                     n_mels=62
                     )
 
 
 ##################### Load Model #####################
-model = torch.load(os.path.join("final-project","models", "cnn_model"), weights_only=False)
-model.eval()
-CLASSES = {0 : "clap", 1: "harmonica", 2: "silence", 3: "whistle"}
+model_path = os.path.join("final-project", "models", "onnx_cnn_model", "cnn_model.onnx")
+# model = torch.load(model_path, weights_only=False)
+# model.eval()
+session = ort.InferenceSession(model_path)
+input_name = session.get_inputs()[0].name
+output_name = session.get_outputs()[0].name
+
+CLASSES = {0 : "silence", 1: "harmonica", 2: "clap", 3: "whistle"}
 
 
 ##################### Callback Function for Processing Input #####################
@@ -73,15 +79,17 @@ with stream:
             except queue.Empty:
                 continue  # No data yet, loop back and wait
 
+            time0 = time()
             ap.update_window(chunk)
-            mfcc = torch.tensor(ap.CalcMFCC(soundData=ap.window, hop=512), dtype=torch.float32)[None, ...]
+            mfcc = ap.CalcMFCC(soundData=ap.window, hop=512)[None, None, ...]
+            time1 = time() - time0
             with torch.no_grad():
-                m = model(mfcc)
-                pred = torch.argmax(model(mfcc)).item()
-                s = CLASSES[pred]
+                m = session.run([output_name], {input_name: mfcc})
+                pred = np.argmax(m[0], axis=1)
+                s = CLASSES[int(pred[0])]
 
                 # if s != sound:
-                print(f"Detecting {m}")
+                print(f"Detecting {s} | pitch : {str(ap.octave)+str(ap.note)} | inference time: {time1}")
 
     except KeyboardInterrupt:
         print("Done processing live data")
