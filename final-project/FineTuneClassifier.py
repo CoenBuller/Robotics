@@ -186,7 +186,7 @@ class FineTuneDataset(Dataset):
                 snr   = random.uniform(*self.car_snr_range)
                 audio = _mix_at_snr(audio, car, snr)
 
-        # 5b. Car noise for validation (always applied when add_car_noise=True)
+        # 5b. Car noise for validation (always applied when add_car_noise=True)-
         elif self.add_car_noise:
             car   = _sample_noise_chunk(self.noise_pool, len(audio))
             snr   = random.uniform(*self.car_snr_range)
