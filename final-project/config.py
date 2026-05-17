@@ -10,6 +10,8 @@ class AugmentConfig:
     noise_snr_range:  Tuple[float, float] = (10.0, 30.0)   # dB  (higher = cleaner)
     # Which noise types to sample from. 
     noise_types:      List[str] = field(default_factory=lambda: ['white', 'pink'])
+    db_reduction:       int = 20
+
  
     # --- Frame shift ---
     time_shift_prob:  float = 0.3
@@ -33,4 +35,6 @@ class AugmentConfig:
     # --- Mixup --- 
     alpha:              float = 0.2
     mixup_prob:         float = 0.3
+
+    # --- Background ---
 

@@ -1,0 +1,36 @@
+import sounddevice as sd
+import os
+from scipy.io import wavfile
+import time
+
+RATE = 15_872
+DURATION = 900
+
+print(sd.query_devices()) # Uncommend if you want to know which audio device is being used. 
+
+classes = ['clap', 'whistle', 'harmonica', 'silence']
+for c in classes:
+    os.makedirs(f'data/{c}', exist_ok=True)
+
+
+def record_one(label, number):
+    input(f"[{label.upper()} {number + 1}/20] Press Enter to record...")
+    time.sleep(0.2)
+    print("recording")
+    audio = sd.rec(int(DURATION * RATE), samplerate=RATE, channels=1, dtype='float32')
+    sd.wait()
+
+    path = f'data/{label}_{number}.wav'
+    wavfile.write(path, RATE, audio)
+    print(f"Saved: {path}\n")
+
+
+for c in classes:
+    if c != "silence":
+        continue
+
+    print(f"--- Starting {c.upper()} ---")
+    for i in range(80, 81):
+        record_one(c, i)
+
+print("All samples recorded successfully.")

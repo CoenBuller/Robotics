@@ -5,9 +5,10 @@ import librosa as lb
 import os
 import torch.onnx
 from onnxruntime.quantization import quantize_dynamic, QuantType
+from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
-from SoundClassifier2 import AudioCNN
+from SoundClassifier import AudioCNN
 from torch import nn
 from AudioAugmentationPipelin import AudioAugmentationPipeline, AugmentationScheduler
 from config import AugmentConfig
@@ -21,7 +22,7 @@ def export_for_pi(model, filename: str, quantize: bool = True):
     os.makedirs(save_dir, exist_ok=True)
 
     # Dummy input matching your expected input dimensions
-    dummy = torch.randn(1, 2, 62, 32) 
+    dummy = torch.randn(1, 2, 62, 32)
 
     # Export ONNX with Opset 13
     onnx_path = os.path.join(save_dir, filename)
@@ -33,7 +34,7 @@ def export_for_pi(model, filename: str, quantize: bool = True):
         input_names=["melspec"],
         output_names=["logits"],
         opset_version=13,
-        dynamo=False,  
+        dynamo=False,
         dynamic_axes={
             'melspec': {0: 'batch_size'},
             'logits': {0: 'batch_size'}
@@ -52,7 +53,6 @@ def export_for_pi(model, filename: str, quantize: bool = True):
     print("Saved quantized:", quant_path)
 
 
-
 def createLabels(audio_files: list[str], classes: list[str]):
     classes_dict = {c: i for i, c in enumerate(classes)}
     files = []
@@ -67,6 +67,7 @@ def createLabels(audio_files: list[str], classes: list[str]):
 
     return files, labels
 
+
 def _class_accuracy_table(class_correct: np.ndarray, class_total: np.ndarray, class_names: list[str]) -> str:
     """Return a compact per-class accuracy string for tqdm.write."""
     col_w = max(len(n) for n in class_names) + 2
@@ -79,9 +80,10 @@ def _class_accuracy_table(class_correct: np.ndarray, class_total: np.ndarray, cl
     return f"  {header}\n  {row}"
 
 
-
 class AudioDataset(Dataset):
-    def __init__(self, files: list[str], labels: list[int], audio_augmenter: AudioAugmentationPipeline, hop: int = 512, augment: bool = True, noise: bool = True, pitch: bool = True, volume: bool = True, spec_aug: bool = True, timeshift: bool = True):
+    def __init__(self, files, labels, audio_augmenter, hop=512, augment=True,
+                 noise=True, pitch=True, volume=True, spec_aug=True,
+                 timeshift=True, no_noise_labels: set[int] | None = None):
         self.X = files
         self.y = labels
         self.aa = audio_augmenter
@@ -92,83 +94,144 @@ class AudioDataset(Dataset):
         self.volume = volume
         self.spec_aug = spec_aug
         self.timeshift = timeshift
+        self.no_noise_labels = no_noise_labels or set()
 
     def __getitem__(self, idx):
-        x = self.X[idx]
-        audio_data, sr = lb.load(path=x, sr=self.aa.sr, duration=1)
+        label = self.y[idx]
+        audio_data, sr = lb.load(path=self.X[idx], sr=self.aa.sr, duration=1)
 
-        # If audio is not exactly 1 second long, pad so it can be processed by the network
         audio_len = len(audio_data)
         if audio_len < sr:
-            d = sr - audio_len
-            audio_data = np.pad(audio_data, pad_width=(0, d)) # type: ignore
+            audio_data = np.pad(audio_data, pad_width=(0, sr - audio_len))
 
-        is_clap = (self.y[idx] == 0)
-
+        # Only apply augmentation on the training set, not validation
         x = self.aa.process(
             audio=audio_data,
-            noise=True,
-            pitch=not is_clap,      # pitch shift is less meaningful for claps
-            volume=True,
-            spec_aug=True,
-            time_shift=True,
-            polarity_flip=is_clap,  # free augmentation, very effective for claps
-            extra_noise=is_clap,    # slightly heavier noise for clap only
+            volume=self.augment and self.volume,
+            spec_aug=self.augment and self.spec_aug,
+            time_shift=self.augment and self.timeshift,
         )
 
-        x = self.aa.process(audio=audio_data, noise=self.noise, pitch=self.pitch, volume=self.volume, spec_aug=self.spec_aug, time_shift=self.timeshift)
-
-        return torch.tensor(x, dtype=torch.float32), self.y[idx]  # (2, 62, 32)
+        return torch.tensor(x, dtype=torch.float32).unsqueeze(0), label
 
     def __len__(self):
         return len(self.X)
 
 
-def train(files, labels, audio_processor, n_classes, class_names: list[str] | None = None, epochs=500, lr=3e-3):
+def _run_validation(model, loader, loss_fn, n_classes):
+    """Run one full pass over the validation loader. Returns (avg_loss, correct, total)."""
+    model.eval()
+    val_loss = 0.0
+    class_correct = np.zeros(n_classes, dtype=np.int64)
+    class_total   = np.zeros(n_classes, dtype=np.int64)
+
+    with torch.no_grad():
+        for X_batch, y_batch in loader:
+            logits = model(X_batch)
+            val_loss += loss_fn(logits, y_batch).item()
+            preds = logits.argmax(dim=1)
+            for cls in range(n_classes):
+                mask = y_batch == cls
+                class_correct[cls] += (preds[mask] == cls).sum().item()
+                class_total[cls]   += mask.sum().item()
+
+    return val_loss / len(loader), class_correct, class_total
+
+
+def train(
+    files,
+    labels,
+    audio_processor,
+    n_classes,
+    class_names=None,
+    epochs=100,
+    lr=3e-3,
+    no_noise_labels=None,
+    val_split=0.1,
+    patience=10,
+    best_model_path="best_model.pt",
+):
     if class_names is None:
         class_names = [str(i) for i in range(n_classes)]
-    dataset = AudioDataset(files, labels, audio_processor, augment=True)
 
-    # Weighted sampler to counter class imbalance
-    class_counts = np.bincount(labels)
-    class_weights = 1.0 / class_counts
-    sample_weights = [float(class_weights[label]) for label in labels]
-    sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+    # ── Stratified train / val split ─────────────────────────────────────────
+    files  = np.array(files)
+    labels = np.array(labels)
 
-    loader = DataLoader(dataset, batch_size=32, num_workers=4, sampler=sampler, pin_memory=True)
-    steps_per_epoch = len(loader)
-
-    model = AudioCNN(n_classes=n_classes)
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
-    sched = torch.optim.lr_scheduler.OneCycleLR(
-        opt,
-        max_lr=lr,
-        steps_per_epoch=steps_per_epoch,
-        epochs=epochs,
-        pct_start=0.1,          # 10 % warm-up
-        anneal_strategy="cos",
-        div_factor=10.0,        # start lr = max_lr / 10
-        final_div_factor=1e3,   # end lr = max_lr / 1000
+    train_files, val_files, train_labels, val_labels = train_test_split(
+        files, labels,
+        test_size=val_split,
+        stratify=labels,        # keeps class ratios equal in both splits
+        random_state=42,
     )
 
-    # Label smoothing (0.1) acts as a regulariser and prevents over-confident
-    # predictions — especially useful when the dataset is small.
-    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
+    tqdm.write(f"Train samples: {len(train_files)}  |  Val samples: {len(val_files)}")
+    for cls_idx, name in enumerate(class_names):
+        n_train = (train_labels == cls_idx).sum()
+        n_val   = (val_labels   == cls_idx).sum()
+        tqdm.write(f"  {name}: {n_train} train / {n_val} val")
 
-    aug_scheduler = AugmentationScheduler(audio_processor)
+    # ── Datasets ─────────────────────────────────────────────────────────────
+    train_dataset = AudioDataset(
+        train_files.tolist(), train_labels.tolist(),
+        audio_processor, augment=True, no_noise_labels=no_noise_labels,
+    )
+    val_dataset = AudioDataset(
+        val_files.tolist(), val_labels.tolist(),
+        audio_processor, augment=False,   # no augmentation on val
+    )
+
+    # Weighted sampler on train only to counter class imbalance
+    class_counts   = np.bincount(train_labels, minlength=n_classes)
+    class_weights  = 1.0 / np.maximum(class_counts, 1)
+    sample_weights = [float(class_weights[l]) for l in train_labels]
+    sampler = WeightedRandomSampler(sample_weights, num_samples=len(sample_weights), replacement=True)
+
+    train_loader = DataLoader(train_dataset, batch_size=64, num_workers=8,
+                              sampler=sampler)
+    val_loader   = DataLoader(val_dataset,   batch_size=64, num_workers=8,
+                              shuffle=False)
+
+    steps_per_epoch = len(train_loader)
+
+    # ── Model / optimiser / scheduler ────────────────────────────────────────
+    model   = AudioCNN(n_classes=n_classes)
+    opt     = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
+
+    total_warmup_steps = max(1, int(epochs * 0.1)) * steps_per_epoch
+    warmup_sched = torch.optim.lr_scheduler.LinearLR(
+        opt,
+        start_factor=0.1,       # begin at lr * 0.1
+        end_factor=1.0,         # reach full lr at end of warmup
+        total_iters=total_warmup_steps,
+    )
+    # After warm-up, val loss drives LR reductions
+    plateau_sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        opt,
+        mode="min",
+        factor=0.5,             # halve LR on plateau
+        patience=5,             # wait 5 epochs before reducing
+        min_lr=1e-6,
+    )
+    global_step = 0             # counts total batches seen across all epochs
+
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0)
+
+    # ── Early-stopping state ─────────────────────────────────────────────────
+    best_val_loss    = float("inf")
+    epochs_no_improve = 0
+
     epoch_bar = tqdm(range(epochs), desc="Epochs", position=0)
 
     for epoch in epoch_bar:
+        # ── Training pass ────────────────────────────────────────────────────
         model.train()
-        total_loss = 0.0
-        last_acc = 0.0
-
-        # Per-class accumulators reset every epoch
+        total_loss    = 0.0
         class_correct = np.zeros(n_classes, dtype=np.int64)
         class_total   = np.zeros(n_classes, dtype=np.int64)
 
         batch_bar = tqdm(
-            loader,
+            train_loader,
             desc=f"Epoch {epoch + 1:>4}/{epochs}",
             position=1,
             leave=False,
@@ -177,92 +240,124 @@ def train(files, labels, audio_processor, n_classes, class_names: list[str] | No
 
         for batch_idx, (X_batch, y_batch) in enumerate(batch_bar):
             opt.zero_grad()
-
             logits = model(X_batch)
-            loss = loss_fn(logits, y_batch)
+            loss   = loss_fn(logits, y_batch)
             loss.backward()
-
-            # Gradient clipping prevents exploding gradients without touching lr
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
             opt.step()
-            sched.step()  # OneCycleLR steps every batch, not every epoch
+
+            # LinearLR steps every batch; becomes a no-op after total_warmup_steps
+            if global_step < total_warmup_steps:
+                warmup_sched.step()
+            global_step += 1
 
             total_loss += loss.item()
-
-            # Batch accuracy
             preds = logits.argmax(dim=1)
-            last_acc = (preds == y_batch).float().mean().item()
 
-            # Accumulate per-class hits for the epoch summary
             for cls in range(n_classes):
                 mask = y_batch == cls
                 class_correct[cls] += (preds[mask] == cls).sum().item()
                 class_total[cls]   += mask.sum().item()
 
-            # Current learning rate (same for all param groups here)
-            current_lr = opt.param_groups[0]["lr"]
-
             batch_bar.set_postfix(
                 batch=f"{batch_idx + 1}/{steps_per_epoch}",
                 loss=f"{loss.item():.4f}",
-                acc=f"{last_acc * 100:.1f}%",
-                lr=f"{current_lr:.2e}",
+                lr=f"{opt.param_groups[0]['lr']:.2e}",
             )
 
-        avg_loss = total_loss / steps_per_epoch
-        epoch_acc = class_correct.sum() / class_total.sum()  # overall accuracy this epoch
-        epoch_bar.set_postfix(avg_loss=f"{avg_loss:.4f}", acc=f"{epoch_acc * 100:.1f}%")
+        avg_train_loss = total_loss / steps_per_epoch
+        train_acc      = class_correct.sum() / class_total.sum()
 
-        # Print per-class breakdown below the bars every epoch
-        table = _class_accuracy_table(class_correct, class_total, class_names)
-        tqdm.write(f"\nEpoch {epoch + 1} — avg loss: {avg_loss:.4f}  acc: {epoch_acc * 100:.1f}%\n{table}\n")
+        # ── Validation pass ──────────────────────────────────────────────────
+        avg_val_loss, val_correct, val_total = _run_validation(
+            model, val_loader, loss_fn, n_classes
+        )
+        val_acc = val_correct.sum() / val_total.sum()
 
-        # Curriculum: ratchet up augmentation difficulty when accuracy improves
-        aug_scheduler.step(epoch_acc)
+        # ReduceLROnPlateau steps on val loss (after warm-up)
+        if global_step > total_warmup_steps:
+            plateau_sched.step(avg_val_loss)
+
+        # ── Logging ──────────────────────────────────────────────────────────
+        epoch_bar.set_postfix(
+            train_loss=f"{avg_train_loss:.4f}",
+            val_loss=f"{avg_val_loss:.4f}",
+            val_acc=f"{val_acc * 100:.1f}%",
+        )
+
+        val_table = _class_accuracy_table(val_correct, val_total, class_names)
+        tqdm.write(
+            f"\nEpoch {epoch + 1}"
+            f" — train_loss: {avg_train_loss:.4f}  train_acc: {train_acc * 100:.1f}%"
+            f" — val_loss: {avg_val_loss:.4f}  val_acc: {val_acc * 100:.1f}%"
+            f"  lr: {opt.param_groups[0]['lr']:.2e}"
+            f"\n  val per-class:\n{val_table}\n"
+        )
+
+        # ── Early stopping & best model saving ───────────────────────────────
+        if avg_val_loss < best_val_loss:
+            best_val_loss     = avg_val_loss
+            epochs_no_improve = 0
+            torch.save(model.state_dict(), best_model_path)
+            tqdm.write(f"  ✓ New best val_loss={best_val_loss:.4f} — model saved to {best_model_path}")
+        else:
+            epochs_no_improve += 1
+            tqdm.write(f"  No improvement for {epochs_no_improve}/{patience} epochs")
+
+            if epochs_no_improve >= patience:
+                tqdm.write(
+                    f"\n⚑ Early stopping at epoch {epoch + 1}. "
+                    f"Best val_loss: {best_val_loss:.4f}. "
+                    f"Loading best weights from {best_model_path}."
+                )
+                model.load_state_dict(torch.load(best_model_path))
+                break
 
     return model
 
 
 if __name__ == "__main__":
-    data_folder = "data"
+    data_folder   = "data"
     class_folders = os.listdir(data_folder)
 
     audio_files = []
-    labels = []
+    labels      = []
 
     # Read all files and label them by their folder name
     for label, folder in tqdm(enumerate(class_folders)):
-        p = os.path.join(data_folder, folder)
+        p     = os.path.join(data_folder, folder)
         files = os.listdir(p)
         for file in files:
             fp = os.path.join(p, file)
             audio_files.append(fp)
             labels.append(label)
 
-    print(f"Example audio path, with corresponding label: {audio_files[0]} | {labels[0]}")
     print(f"Classes: {class_folders}")
     print(np.unique(labels))
 
-    cfg = AugmentConfig(                
-                        noise_prob=0.4,       noise_snr_range=(20, 30),
-                        pitch_shift_prob=0.4, pitch_shift_range=(-1, 1),
-                        time_shift_prob=0.3, time_shift_range=(-0.1, 0.1),
-                        volume_scale_prob=0.4, volume_gain_range=(0.8, 1.2),
-                        spec_augment_prob=0.2,
-                        n_freq_masks=1, freq_mask_param=1,
-                        n_time_masks=1, time_mask_param=1,
-                        mixup_prob=0.4, alpha=0.2
-                        )
+    cfg = AugmentConfig(
+        noise_prob=0.6,        noise_snr_range=(5, 30),
+        pitch_shift_prob=0.5,  pitch_shift_range=(-4, 4),
+        time_shift_prob=0.5,   time_shift_range=(-0.4, 0.1),
+        volume_scale_prob=0.4, volume_gain_range=(0.6, 1.2),
+        spec_augment_prob=0.2,
+        n_freq_masks=8,
+        n_time_masks=8,
+    )
+
 
     ap = AudioAugmentationPipeline(config=cfg, n_mels=62, hop=512, n_fft=512, sr=15_872)
+
     model = train(
         files=audio_files,
         labels=labels,
         audio_processor=ap,
         n_classes=len(class_folders),
         class_names=class_folders,
-        epochs=250,
+        epochs=80,
+        val_split=0.1,          # 10 % held out for validation
+        patience=10,            # stop after 10 epochs without val_loss improvement
+        best_model_path=os.path.join("final-project", "models", "best_model.pt"),
     )
+
     torch.save(model, os.path.join("final-project", "models", "cnn_model2"))
-    export_for_pi(model, filename="onnx_cnn_model2")
