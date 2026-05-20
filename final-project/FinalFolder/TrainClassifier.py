@@ -3,54 +3,15 @@ import torch
 import numpy as np
 import librosa as lb
 import os
-import torch.onnx
-from onnxruntime.quantization import quantize_dynamic, QuantType
+
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from SoundClassifier import AudioCNN
 from torch import nn
-from AudioAugmentationPipelin import AudioAugmentationPipeline, AugmentationScheduler
+from AudioAugmentationPipelin import AudioAugmentationPipeline
 from config import AugmentConfig
 
-
-def export_for_pi(model, filename: str, quantize: bool = True):
-    model.eval()
-
-    # Create export directory
-    save_dir = "final-project/models/onnx_cnn_model"
-    os.makedirs(save_dir, exist_ok=True)
-
-    # Dummy input matching your expected input dimensions
-    dummy = torch.randn(1, 2, 62, 32)
-
-    # Export ONNX with Opset 13
-    onnx_path = os.path.join(save_dir, filename)
-
-    torch.onnx.export(
-        model,
-        (dummy,),
-        onnx_path,
-        input_names=["melspec"],
-        output_names=["logits"],
-        opset_version=13,
-        dynamo=False,
-        dynamic_axes={
-            'melspec': {0: 'batch_size'},
-            'logits': {0: 'batch_size'}
-        }
-    )
-
-    print("Saved:", onnx_path)
-
-    # Quantize
-    quant_path = os.path.join(save_dir, filename.rstrip(".onnx") + "_int8.onnx")
-    quantize_dynamic(
-        model_input=onnx_path,
-        model_output=quant_path,
-        weight_type=QuantType.QInt8,
-    )
-    print("Saved quantized:", quant_path)
 
 
 def createLabels(audio_files: list[str], classes: list[str]):
@@ -107,9 +68,11 @@ class AudioDataset(Dataset):
         # Only apply augmentation on the training set, not validation
         x = self.aa.process(
             audio=audio_data,
+            noise=self.augment and self.noise and (label not in self.no_noise_labels),
             volume=self.augment and self.volume,
             spec_aug=self.augment and self.spec_aug,
             time_shift=self.augment and self.timeshift,
+            pitch=self.augment and self.pitch,
         )
 
         return torch.tensor(x, dtype=torch.float32).unsqueeze(0), label
@@ -149,7 +112,7 @@ def train(
     no_noise_labels=None,
     val_split=0.1,
     patience=10,
-    best_model_path="best_model.pt",
+    best_model_path="best_model2.pt",
 ):
     if class_names is None:
         class_names = [str(i) for i in range(n_classes)]
@@ -194,7 +157,7 @@ def train(
 
     steps_per_epoch = len(train_loader)
 
-    # ── Model / optimiser / scheduler ────────────────────────────────────────
+    #  Model / optimiser / scheduler 
     model   = AudioCNN(n_classes=n_classes)
     opt     = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-3)
 
@@ -217,14 +180,14 @@ def train(
 
     loss_fn = nn.CrossEntropyLoss(label_smoothing=0)
 
-    # ── Early-stopping state ─────────────────────────────────────────────────
+    #  Early-stopping state 
     best_val_loss    = float("inf")
     epochs_no_improve = 0
 
     epoch_bar = tqdm(range(epochs), desc="Epochs", position=0)
 
     for epoch in epoch_bar:
-        # ── Training pass ────────────────────────────────────────────────────
+        #  Training pass 
         model.train()
         total_loss    = 0.0
         class_correct = np.zeros(n_classes, dtype=np.int64)
@@ -268,7 +231,7 @@ def train(
         avg_train_loss = total_loss / steps_per_epoch
         train_acc      = class_correct.sum() / class_total.sum()
 
-        # ── Validation pass ──────────────────────────────────────────────────
+        #  Validation pass 
         avg_val_loss, val_correct, val_total = _run_validation(
             model, val_loader, loss_fn, n_classes
         )
@@ -278,7 +241,7 @@ def train(
         if global_step > total_warmup_steps:
             plateau_sched.step(avg_val_loss)
 
-        # ── Logging ──────────────────────────────────────────────────────────
+        #  Logging 
         epoch_bar.set_postfix(
             train_loss=f"{avg_train_loss:.4f}",
             val_loss=f"{avg_val_loss:.4f}",
@@ -294,7 +257,7 @@ def train(
             f"\n  val per-class:\n{val_table}\n"
         )
 
-        # ── Early stopping & best model saving ───────────────────────────────
+        #  Early stopping & best model saving 
         if avg_val_loss < best_val_loss:
             best_val_loss     = avg_val_loss
             epochs_no_improve = 0
@@ -359,5 +322,5 @@ if __name__ == "__main__":
         patience=10,            # stop after 10 epochs without val_loss improvement
         best_model_path=os.path.join("final-project", "models", "best_model.pt"),
     )
-
+    os.makedirs(os.path.join("final-project", "models"), exist_ok=True)
     torch.save(model, os.path.join("final-project", "models", "cnn_model2"))

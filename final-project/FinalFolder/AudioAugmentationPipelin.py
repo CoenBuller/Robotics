@@ -31,12 +31,7 @@ class AudioAugmentationPipeline:
         self.config    = config or AugmentConfig()
 
         # Instances for calculating log mel spectograms
-        # self.mfcc_transform = T.MFCC(
-        #                             sample_rate=sr,
-        #                             n_mfcc=n_mels,
-        #                             log_mels=True,
-        #                             melkwargs={"hop_length": hop, "n_fft": n_fft, "n_mels": n_mels},
-        #                             )
+
         self.mel_spectogram = T.MelSpectrogram(sample_rate=self.sr, n_fft=n_fft, hop_length=hop, n_mels=n_mels)
         self.amplitude_to_db = T.AmplitudeToDB(top_db=90)
  
@@ -136,9 +131,8 @@ class AudioAugmentationPipeline:
 
         audio /= (np.max(np.abs(audio)) + 1e-9) # Normalize it
         
-        # 7 ── Extract MFCCs
+        # 7 ── Extract log-Mel spectrogram
         audio_tensor = torch.from_numpy(audio.astype(np.float32))            # shape: (1, audio) 
-        # mfcc = self.mfcc_transform(audio_tensor).numpy()
         mfcc = self.mel_spectogram(audio_tensor)
         mfcc = self.amplitude_to_db(mfcc).numpy()
 
@@ -148,80 +142,3 @@ class AudioAugmentationPipeline:
  
         return mfcc
  
-
-
-class AugmentationScheduler:
-    """
-    Upgrades augmentation difficulty in stages as epoch accuracy crosses
-    predefined thresholds.  Each stage is a full AugmentConfig; once a
-    threshold is reached the scheduler replaces the pipeline's config and
-    never steps down again (one-way ratchet).
-
-    Thresholds are expressed as fractions (0–1).  Adjust the stage configs
-    below to match your data and pipeline's parameter names.
-    """
-
-    def __init__(self, pipeline: AudioAugmentationPipeline):
-        self.pipeline = pipeline
-        self.current_stage = 0
-
-        # ── Curriculum stages ─────────────────────────────────────────────────
-        # Stage 0  (< 50 %)  – gentle: low probs, tight ranges
-        # Stage 1  (≥ 50 %)  – moderate: higher probs, wider ranges
-        # Stage 2  (≥ 70 %)  – hard: aggressive everything
-        # Stage 3  (≥ 85 %)  – brutal: maximum pressure, more masks
-        self.stages = [
-            # threshold, config
-            (0.50, AugmentConfig(
-                noise_prob=0.5,       noise_snr_range=(15, 30), db_reduction=15,
-                pitch_shift_prob=0.4, pitch_shift_range=(-2, 2),
-                time_shift_prob=0.4, time_shift_range=(-0.3, 0.1),
-                volume_scale_prob=0.4, volume_gain_range=(0.7, 1.3),
-                spec_augment_prob=0.5,
-                n_freq_masks=1,
-                n_time_masks=1,
-
-            )),
-
-            (0.70, AugmentConfig(
-                noise_prob=0.65,      noise_snr_range=(10, 25), db_reduction=10,
-                pitch_shift_prob=0.55, pitch_shift_range=(-3, 3),
-                time_shift_prob=0.5, time_shift_range=(-0.3, 0.15),
-                volume_scale_prob=0.55, volume_gain_range=(0.6, 1.4),
-                spec_augment_prob=0.65,
-                n_freq_masks=1, freq_mask_param=4,
-                n_time_masks=1, time_mask_param=2,
-
-            )),
-
-            (0.85, AugmentConfig(
-                noise_prob=0.7,      noise_snr_range=(5, 20), db_reduction=5,
-                pitch_shift_prob=0.70, pitch_shift_range=(-5, 5),
-                time_shift_prob=0.6, time_shift_range=(-0.4, 0.2),
-                volume_scale_prob=0.70, volume_gain_range=(0.3, 1.5),
-                spec_augment_prob=0.80,
-                n_freq_masks=2, freq_mask_param=3,
-                n_time_masks=1, time_mask_param=2,
-            )),
-        ]
-        # ─────────────────────────────────────────────────────────────────────
-
-    def step(self, epoch_acc: float) -> bool:
-        """
-        Call once per epoch with the overall accuracy (0–1).
-        Returns True and logs a message if a new stage was unlocked.
-        """
-        if self.current_stage >= len(self.stages):
-            return False  # Already at maximum difficulty
-
-        threshold, new_cfg = self.stages[self.current_stage]
-        if epoch_acc >= threshold:
-            self.pipeline.config = new_cfg
-            stage_num = self.current_stage + 1
-            self.current_stage += 1
-            tqdm.write(
-                f"\n  ▲ Augmentation unlocked stage {stage_num} "
-                f"(acc {epoch_acc * 100:.1f}% ≥ {threshold * 100:.0f}%)\n"
-            )
-            return True
-        return False
